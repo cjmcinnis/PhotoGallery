@@ -52,6 +52,7 @@ public class FlickrFetcher {
         return new String(getUrlBytes(urlSpec));
     }
 
+
     public List<GalleryItem> fetchItems(int pageNumber, List<GalleryItem> items){
 
         if(items == null) {
@@ -89,6 +90,11 @@ public class FlickrFetcher {
         String jsonPhotoString = photosJsonArray.toString();
 
         List<GalleryItem> galleryItemList = gson.fromJson(jsonPhotoString, galleryItemType);
+
+        for(int i = 0; i < galleryItemList.size(); i++){
+            if(galleryItemList.get(i).getUrl() == null)
+                galleryItemList.remove(i);
+        }
         items.addAll(galleryItemList);
     }
 }

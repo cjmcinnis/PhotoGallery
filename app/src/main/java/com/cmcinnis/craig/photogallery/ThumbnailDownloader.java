@@ -22,7 +22,7 @@ public class ThumbnailDownloader<T> extends HandlerThread {
     private ThumbnailDownloadListener<T> mThumbnailDownloadListener;
 
     public interface ThumbnailDownloadListener<T> {
-        void onThumbnailDownloaded(T target, Bitmap thumbnail);
+        void onThumbnailDownloaded(T target, Bitmap thumbnail, String url);
     }
 
     public void setThumbnailDownloadListener(ThumbnailDownloadListener<T> listener){
@@ -93,7 +93,7 @@ public class ThumbnailDownloader<T> extends HandlerThread {
                     }
 
                     mRequestMap.remove(target);
-                    mThumbnailDownloadListener.onThumbnailDownloaded(target, bitmap);
+                    mThumbnailDownloadListener.onThumbnailDownloaded(target, bitmap, url);
                 }
             });
         }catch (IOException ioe){
@@ -101,4 +101,3 @@ public class ThumbnailDownloader<T> extends HandlerThread {
         }
     }
 }
-

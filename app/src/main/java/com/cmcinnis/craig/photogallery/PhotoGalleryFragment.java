@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
+import android.support.v4.util.LruCache;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
@@ -33,6 +34,9 @@ public class PhotoGalleryFragment extends Fragment {
     private boolean updating;
     private ThumbnailDownloader<PhotoHolder> mThumbnailDownloader;
 
+    private static final int PHOTO_CACHE_SIZE = 4 * 1024 * 1024;
+    private LruCache<String, Drawable> mPhotoCache;
+
     public static PhotoGalleryFragment newInstance(){
         return new PhotoGalleryFragment();
     }
@@ -43,14 +47,18 @@ public class PhotoGalleryFragment extends Fragment {
         setRetainInstance(true);
         new FetchItemsTask().execute();
 
+        //initialize bitmap cache
+        mPhotoCache = new LruCache<String, Drawable>(PHOTO_CACHE_SIZE);
+
         Handler responseHandler = new Handler();
         mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
         mThumbnailDownloader.setThumbnailDownloadListener(
                 new ThumbnailDownloader.ThumbnailDownloadListener<PhotoHolder>() {
                     @Override
-                    public void onThumbnailDownloaded(PhotoHolder target, Bitmap thumbnail) {
+                    public void onThumbnailDownloaded(PhotoHolder target, Bitmap thumbnail, String url) {
                         Drawable drawable = new BitmapDrawable(getResources(), thumbnail);
                         target.bindDrawable(drawable);
+                        mPhotoCache.put(url, drawable);
                     }
                 });
         mThumbnailDownloader.start();
@@ -154,8 +162,17 @@ public class PhotoGalleryFragment extends Fragment {
         public void onBindViewHolder(@NonNull PhotoHolder photoHolder, int position) {
             GalleryItem galleryItem = mGalleryItems.get(position);
             Drawable placeholder = getResources().getDrawable(R.drawable.bill_up_close);
+
             photoHolder.bindDrawable(placeholder);
-            mThumbnailDownloader.queueThumbnail(photoHolder, galleryItem.getUrl());
+            //mThumbnailDownloader.queueThumbnail(photoHolder, galleryItem.getUrl());
+            //check if we have the image cached already
+            if(galleryItem.getUrl() == null)
+                Log.e(TAG, "WTFFF");
+            if(mPhotoCache.get(galleryItem.getUrl()) == null) {
+                mThumbnailDownloader.queueThumbnail(photoHolder, galleryItem.getUrl());
+            }else{
+                photoHolder.bindDrawable(mPhotoCache.get(galleryItem.getUrl()));
+            }
         }
 
         @Override
