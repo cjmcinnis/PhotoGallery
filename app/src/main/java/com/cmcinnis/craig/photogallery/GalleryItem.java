@@ -13,7 +13,7 @@ public class GalleryItem {
     @Expose()
     private String mId;
 
-    @SerializedName("url")
+    @SerializedName("url_s")
     @Expose()
     private String mUrl;
 
