@@ -1,9 +1,15 @@
 package com.cmcinnis.craig.photogallery;
 
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
@@ -31,11 +37,11 @@ import java.util.List;
 public class PhotoGalleryFragment extends Fragment {
 
     private static final String TAG = "PhotoGalleryFragment";
+    private static final int PHOTO_JOB_ID = 1;
 
     private RecyclerView mPhotoRecyclerView;
     private GridLayoutManager mPhotoLayoutManager;
     private List<GalleryItem> mItems = new ArrayList<>();
-    private int mPhotoPageNumber;
     private boolean updating;
     private ThumbnailDownloader<PhotoHolder> mThumbnailDownloader;
 
@@ -56,10 +62,38 @@ public class PhotoGalleryFragment extends Fragment {
         setHasOptionsMenu(true);
         updateItems();
 
+        //use JobService if running >= LOLLIPOP
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
+        {
+            JobScheduler scheduler = (JobScheduler)
+                    getContext().getSystemService(Context.JOB_SCHEDULER_SERVICE);
+
+            //check if it is already scheduled
+            boolean hasBeenScheduled = false;
+            for(JobInfo jobInfo : scheduler.getAllPendingJobs()){
+                if(jobInfo.getId() == PHOTO_JOB_ID){
+                    hasBeenScheduled = true;
+                }
+            }
+            //otherwise create it
+            if(!hasBeenScheduled){
+                JobInfo jobInfo = new JobInfo.Builder(PHOTO_JOB_ID, new ComponentName(getContext(), PollServiceJS.class))
+                        .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)
+                        .setPeriodic(1000 * 60 * 15)
+                        .setPersisted(true)
+                        .build();
+            }
+        } else {
+            Intent i = PollService.newIntent(getActivity());
+            getActivity().startService(i);
+        }
+
         //initialize bitmap cache
         mPhotoCache = new LruCache<String, Drawable>(PHOTO_CACHE_SIZE);
 
-        /*Handler responseHandler = new Handler();
+
+        //starting handler for downloading images
+        Handler responseHandler = new Handler();
         mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
         mThumbnailDownloader.setThumbnailDownloadListener(
                 new ThumbnailDownloader.ThumbnailDownloadListener<PhotoHolder>() {
@@ -73,7 +107,7 @@ public class PhotoGalleryFragment extends Fragment {
                 });
         mThumbnailDownloader.start();
         mThumbnailDownloader.getLooper();
-        Log.i(TAG, "Background thread started");*/
+        Log.i(TAG, "Background thread started");
     }
 
     @Override
@@ -102,9 +136,12 @@ public class PhotoGalleryFragment extends Fragment {
             public boolean onQueryTextSubmit(String s) {
                 Log.d(TAG, "QueryTextSubmit " + s);
                 QueryPreferences.setStoredQuery(getActivity(), s);
-                updateItems();
+
                 mItems.clear();
                 searchView.clearFocus();
+                QueryPreferences.setStoredPage(getActivity(), 1);
+                updateItems();
+
                 return true;
             }
 
@@ -124,6 +161,13 @@ public class PhotoGalleryFragment extends Fragment {
             }
         });
 
+        MenuItem toggleItem = menu.findItem(R.id.menu_item_toggle_polling);
+        if(PollServiceUtils.isServiceAlarmOn(getActivity())){
+            toggleItem.setTitle(R.string.stop_polling);
+        } else {
+            toggleItem.setTitle(R.string.start_polling);
+        }
+
     }
 
     @Override
@@ -132,6 +176,11 @@ public class PhotoGalleryFragment extends Fragment {
             case R.id.menu_item_clear:
                 QueryPreferences.setStoredQuery(getActivity(), null);
                 updateItems();
+                return true;
+            case R.id.menu_item_toggle_polling:
+                boolean shouldStartAlarm = !PollServiceUtils.isServiceAlarmOn(getActivity());
+                PollServiceUtils.setServiceAlarm(getActivity(), shouldStartAlarm);
+                getActivity().invalidateOptionsMenu();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -156,7 +205,7 @@ public class PhotoGalleryFragment extends Fragment {
         mPhotoRecyclerView.setLayoutManager(mPhotoLayoutManager);
         updating = false;
 
-        mPhotoPageNumber = 1;
+        QueryPreferences.setStoredPage(getActivity(), 1);
 
         mPhotoRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
@@ -169,36 +218,21 @@ public class PhotoGalleryFragment extends Fragment {
                     if((!updating) && (dy > 0) && (lastVisibleItem >= (mItems.size() - 1))) {
 
                         //if user reaches end of page
-                        mPhotoPageNumber++;
+                        int currPage = QueryPreferences.getStoredPage(getActivity());
+                        QueryPreferences.setStoredPage(getActivity(), currPage + 1);
 
                         //request new page
                         String query = QueryPreferences.getStoredQuery(getActivity());
                         new FetchItemsTask(query).execute();
 
-                        Log.d(TAG, "Scrolled to " + mPhotoPageNumber);
+                        Log.d(TAG, "Scrolled to " + currPage + 1);
                     }
                 }
             }
         });
 
         mProgressBar = v.findViewById(R.id.progress_bar);
-        //mProgressBar.setVisibility(View.GONE);
-
-        Handler responseHandler = new Handler();
-        mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
-        mThumbnailDownloader.setThumbnailDownloadListener(
-                new ThumbnailDownloader.ThumbnailDownloadListener<PhotoHolder>() {
-                    @Override
-                    public void onThumbnailDownloaded(PhotoHolder target, Bitmap thumbnail, String url) {
-                        Drawable drawable = new BitmapDrawable(getResources(), thumbnail);
-                        target.bindDrawable(drawable);
-                        mPhotoCache.put(url, drawable);
-                        mPhotoCache.trimToSize(MAX_PHOTOS_CACHED);
-                    }
-                });
-        mThumbnailDownloader.start();
-        mThumbnailDownloader.getLooper();
-        Log.i(TAG, "Background thread started");
+        mProgressBar.setVisibility(View.GONE);
 
         setupAdapter();
 
@@ -251,9 +285,8 @@ public class PhotoGalleryFragment extends Fragment {
             Drawable placeholder = getResources().getDrawable(R.drawable.bill_up_close);
 
             photoHolder.bindDrawable(placeholder);
-            //mThumbnailDownloader.queueThumbnail(photoHolder, galleryItem.getUrl());
-            //check if we have the image cached already
 
+            //check if we have the image cached already
             if(mPhotoCache.get(galleryItem.getUrl()) == null) {
                 mThumbnailDownloader.queueThumbnail(photoHolder, galleryItem.getUrl());
             }else{
@@ -277,11 +310,12 @@ public class PhotoGalleryFragment extends Fragment {
         @Override
         protected List<GalleryItem> doInBackground(Void... params){
             updating = true;
+            int pageNumber = QueryPreferences.getStoredPage(getActivity());
 
             if(mQuery == null){
-                return new FlickrFetcher().fetchRecentPhotos(mPhotoPageNumber);
+                return new FlickrFetcher().fetchRecentPhotos(pageNumber);
             }else{
-                return new FlickrFetcher().searchPhotos(mQuery);
+                return new FlickrFetcher().searchPhotos(mQuery, pageNumber);
             }
         }
 

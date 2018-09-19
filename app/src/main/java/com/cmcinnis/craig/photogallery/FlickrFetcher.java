@@ -100,8 +100,8 @@ public class FlickrFetcher {
         return downloadGalleryItems(url);
     }
 
-    public List<GalleryItem> searchPhotos(String query){
-        String url = buildUrl(SEARCH_METHOD, query, 0);
+    public List<GalleryItem> searchPhotos(String query, int pageNumber){
+        String url = buildUrl(SEARCH_METHOD, query, pageNumber);
         return downloadGalleryItems(url);
     }
 
